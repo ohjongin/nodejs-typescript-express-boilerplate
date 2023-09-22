@@ -1,0 +1,85 @@
+{
+    "api": {
+        "common": {
+            "bad_request": "The request cannot be processed.",
+            "unauthorized": "Sign in or authentication is required",
+            "password_mismatched": "Username or password is invalid",
+            "credential_invalid": "Client id or secret is invalid",
+            "token_expired": "Your login has expired.",
+            "token_invalid": "The login is invalid: You might have exceeded the validity time after signing in, or you're signing in with the same account from a different browser.",
+            "forbidden": "An attempt was made to access an unauthorized resource",
+            "conflict": "The resource that already exists",
+            "out_of_range": "The value exceeded the specified range({{range}}).",
+            "too_big": "The value exceeded the specified limit ({{limit}}).",
+            "not_found": "The resource could not be found",
+            "error": "Error",
+            "ok": "OK"
+        },
+        "order": {
+            "state_change_failed": "Can't change the order status.",
+            "state_change_failed_return": "Orders in the process of being returned cannot be changed to {{target}} state.",
+            "state_change_failed_detail": "Changing from {{current}} to {{target}} is prohibited.",
+            "state_change_failed_volume": "Changing from {{current}} to {{target}} is failed with invalid volume data.",
+            "state_change_failed_seller": "Changing from {{current}} to {{target}} is failed with missing seller volume weight unit error.",
+            "state_change_failed_master": "Changing from {{current}} to {{target}} is failed with missing master info.",
+            "state_change_failed_unknown": "Changing from {{current}} to {{target}} is undefined transition.",
+            "modification_forbidden": "Can't modify the order because of the current state ({{state}}).",
+            "not_found": "The order was not found.",
+            "invalid_id_or_code": "The order ID or code is incorrect.",
+            "invalid_state": "The state of a order is incorrect.",
+            "merge_not_found": "No orders are eligible for order combining.",
+            "currency_mismatch": "The currency of the order information is different from the currency of the ordered products.",
+            "zipcode_empty": "Zipcode is empty",
+            "zipcode_required": "Please enter a valid zipcode"
+        },
+        "parcel": {
+            "empty_in_order": "Empty parcel in a order.",
+            "invalid_in_order": "Invalid parcel in a order."
+        },
+        "signup": {
+            "conflict": "Same name or number is already exist."
+        },
+        "user": {
+            "already_exist": "{{username}} is already exist",
+            "not_found": "User not found.",
+            "locked": "Account is locked. Please contact user system administrator to unlock",
+            "waiting": "Account is waiting. Please contact user system administrator to unlock"
+        },
+        "code": {
+            "used": "This is the code you've already used."
+        },
+        "cbt": {
+            "nation_code_mismatch": "The order has a different country code than the master's."
+        }
+    },
+    "email": {
+        "title": {
+            "signup": {
+                "verification": "[{{hostname}}] ICS Logistic registration verification for {{name}}",
+                "notification": "[{{hostname}}] A new seller({{name}}) has applied to join."
+            },
+            "invite": "[{{hostname}}] ICS Logistic invitation for {{name}}",
+            "password_reset": {
+                "request": "[{{hostname}}] Reset your ICS Logistics password for {{name}}",
+                "notification": "[{{hostname}}] Your ICS Logistics Account password has been reset"
+            }
+        }
+    },
+    "role": {
+        "root": "Root",
+        "admin": "Administrator",
+        "user": "User",
+        "master": "Master",
+        "staff": "Staff",
+        "account": "Account",
+        "order": "Order",
+        "inbound": "Inbound",
+        "outbound": "Outbound",
+        "customs": "Customs",
+        "center_admin": "Center Administrator",
+        "center_user": "Center Staff"
+    },
+    "template": {
+        "signup":"[{{tenantname}}] {{username}} has signed up."
+    }
+}
