@@ -1,12 +1,12 @@
-import {Model, Sequelize} from 'sequelize';
-import env from '../env';
+import { Model, Sequelize } from 'sequelize';
 import logger from '../lib/logger';
 import * as process from 'process';
-import {initialize} from './init';
-import {validateSchemas} from './validate-schema';
-import {isMasterProcess} from 'pm2-master-process';
+import { initialize } from './init';
+import { validateSchemas } from './validate-schema';
+import { isMasterProcess } from 'pm2-master-process';
+import { env } from '../env';
 
-const sequelize = new Sequelize(env.mysql.schema, null, null, {
+const sequelize = env.mysql.write?.host?.length > 0 ? new Sequelize(env.mysql.schema, null, null, {
     dialect: 'mysql',
     dialectOptions: {
         connectTimeout: env.mode.prod ? 5000 : 60000 // 5s for prod, 1min for dev
@@ -18,7 +18,7 @@ const sequelize = new Sequelize(env.mysql.schema, null, null, {
                 host: env.mysql.read.host,
                 username: env.mysql.read.username,
                 password: env.mysql.read.password
-            },
+            }
         ],
         write: {
             host: env.mysql.write.host,
@@ -28,7 +28,7 @@ const sequelize = new Sequelize(env.mysql.schema, null, null, {
     },
     define: {
         charset: 'utf8mb4',
-        collate: 'utf8mb4_general_ci',
+        collate: 'utf8mb4_0900_ai_ci',
         freezeTableName: true,
         hooks: {
             afterCreate: async (instance: Model) => {
@@ -47,15 +47,18 @@ const sequelize = new Sequelize(env.mysql.schema, null, null, {
     logging: (query) => {
         if (query?.includes('SELECT 1+1 AS result')) return;
         logger.sql(query.replace(/(\r\n|\n|\r)/gm, ''));
-    },
-});
+    }
+}) : undefined;
 
 export { sequelize as mysql };
 
 export function initModels() {
+    logger.debug('Initializing MySQL models...');
 }
 
 export function connect() {
+    if (!env.mysql.read.host) return Promise.resolve(sequelize);
+
     return new Promise((resolve, reject) => {
         initModels();
 
@@ -101,4 +104,4 @@ export const getJsonExtractWhere = (col, field, value) => {
     const extractCall = Sequelize.fn('JSON_EXTRACT', Sequelize.col(col), Sequelize.literal(`'$.${field}'`));
     const unquoteCall = Sequelize.fn('JSON_UNQUOTE', extractCall);
     return Sequelize.where(Sequelize.fn('LOWER', unquoteCall), value?.toLowerCase());
-}
+};

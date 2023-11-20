@@ -4,13 +4,13 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 import appRoot from 'app-root-path';
 import tid from 'cls-rtracer';
 import path from 'path';
-import { getFileInfo, jsonMaskConfig, prune } from './utils';
+import { getFileInfo, handleSentry, isValidArray, jsonMaskConfig, prune } from './utils';
 import * as stackTraceParser from 'stacktrace-parser';
-import env from '../env';
+import { env } from '../env';
 import fs from 'fs';
 import * as process from 'process';
+import { format } from 'date-fns';
 import maskdata from 'maskdata';
-import dayjs from "dayjs";
 
 const { combine, timestamp, colorize, printf } = winston.format;
 
@@ -51,27 +51,138 @@ const getContext = (key) => {
     return undefined;
 }
 
-const MESSAGE = Symbol.for('message');
-const jsonFormatter = (logEntry) => {
+const parseLogEntry = (logEntry) => {
+    const module = '/' + path.basename(appRoot.path) + '/';
+    const boilerplateLines = (line) => {
+        return line && module && line.file.indexOf(module) && line.file.indexOf('/node_modules/') < 0 && line.file.indexOf('node:internal/') < 0;
+    };
+
+    let stack;
+    let message;
+    const messages = logEntry['message'];
+    if (logEntry['error'] instanceof Error) {
+        stack = logEntry['error'].stack;
+        message = logEntry['error'].message;
+    } else if (messages?.length > 0) {
+        stack = messages[messages.length - 1];
+        message = messages.slice(0, messages.length - 1);
+    } else {
+        stack = new Error().stack
+        message = messages;
+    }
+
+    const parsed = stackTraceParser.parse(stack);
+    const stacks = parsed.filter(boilerplateLines).filter(line => {
+        return line.file.indexOf('/lib/logger.ts') < 0 && line.file.indexOf('<anonymous>') < 0
+    });
+    const location = isValidArray(stacks) ? stacks[0] : parsed[1];
+    const func = location?.methodName ? location?.methodName : 'invalid';
+    const line = location?.lineNumber? location?.lineNumber : 'invalid';
+    const file = location?.file ? path.basename(location?.file) : 'invalid';
+
+    const pkg = packageInfo;
+    const clientIp = getContext('client_ip');
+    const reqInfo = getContext('req_info');
+    const username = getContext('username');
+
+    const result = {
+        reqInfo, file, line, func, clientIp, pkg, username, stacks, parsed, request: undefined, response: undefined, message
+    };
+
+    if (env?.app?.log?.stack !== true) {
+        result.stacks = logEntry.level === 'error' ? stacks : undefined;
+        result.parsed = undefined;
+    }
+
+    return result;
+}
+
+const payload = (body) => {
+    const { reqInfo, file, line, func, clientIp, pkg, username, request, response, stacks, parsed, message } = body;
+
+    // https://docs.aws.amazon.com/athena/latest/ug/data-types.html
+    return {
+        datetime: format(new Date(), "yyyy-MM-dd HH:mm:ss.SSS"),
+        tid: tid.id(),
+        method: reqInfo?.method,
+        path: reqInfo?.path,
+        file: `${file}:${line}`,
+        func,
+        ip: clientIp,
+        host_ip: reqInfo?.host_ip,
+        version: pkg?.version,
+        build: pkg?.build,
+        ua: prune(reqInfo?.ua),
+        ua_str: reqInfo?.userAgent,
+        pm_id: process.env.pm_id || 0,
+        url: reqInfo?.originalUrl,
+        username,
+        request,
+        response,
+        stacks,
+        parsed,
+        message,
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+        day: new Date().getDate(),
+        timestamp: new Date().getTime(),
+    };
+}
+
+const getMessage = (logEntry) => {
     try {
-        const module = '/' + path.basename(appRoot.path) + '/';
-        const boilerplateLines = (line) => {
-            return line && module && line.file.indexOf(module) && line.file.indexOf('/node_modules/') < 0;
-        };
+        const { reqInfo, file, line, func, clientIp, pkg, username, stacks, parsed, message } = parseLogEntry(logEntry);
 
-        const pkg = packageInfo;
-        const clientIp = getContext('client_ip');
-        const reqInfo = getContext('req_info');
-        const username = getContext('username');
+        const base = payload({
+            reqInfo, file, line, func, clientIp, pkg, username,  stacks, parsed, message
+        });
 
-        const parsed = stackTraceParser.parse(new Error().stack);
-        const stacks = parsed.filter(boilerplateLines);
-        const stack = Array.isArray(stacks) && stacks.length > 2 ? stacks[2] : undefined;
-        const func = stack?.methodName;
-        const line = stack?.lineNumber;
-        const file = path.basename(stack?.file);
+        const result = Object.assign(base, logEntry);
+        result.message = isValidArray(message) ? message : [ message ];
+        return JSON.stringify(result);
+    } catch (e) {
+        console.error(e);
+        handleSentry('error', e, undefined, {
+            logEntry,
+        });
+    }
+
+    return logEntry[MESSAGE];
+}
+
+const MESSAGE = Symbol.for('message');
+const generalFormatter = (logEntry) => {
+    try {
+        logEntry[MESSAGE] = getMessage(logEntry);
+    } catch (e) {
+        console.error(e);
+        handleSentry('error', e, undefined, {
+            message: logEntry['message'],
+            logEntry
+        })
+    }
+
+    return logEntry;
+};
+
+const sqlFormatter = (logEntry) => {
+    try {
+        logEntry[MESSAGE] = getMessage(logEntry);
+    } catch (e) {
+        console.error(e);
+        handleSentry('error', e)
+    }
+
+    return logEntry;
+};
+
+const httpFormatter = (logEntry) => {
+    try {
+        const { reqInfo, file, line, func, clientIp, pkg, username, stacks } = parseLogEntry(logEntry);
+
+        if (env.app.log.excludes.includes(file)) return false;
+
         let request, response;
-
         if (logEntry.level === 'http') {
             const message = logEntry?.message;
             // Circular JSON 오류 방어코드
@@ -99,36 +210,15 @@ const jsonFormatter = (logEntry) => {
             }
         }
 
-        // https://docs.aws.amazon.com/athena/latest/ug/data-types.html
-        const base = {
-            datetime: dayjs().format("YYYY-MM-DD HH:mm:ss.SSS"),
-            tid: tid.id(),
-            method: reqInfo?.method,
-            path: reqInfo?.path,
-            file: `${file}:${line}`,
-            func,
-            ip: clientIp,
-            host_ip: reqInfo?.host_ip,
-            version: pkg?.version,
-            build: pkg?.build,
-            ua: prune(reqInfo?.ua),
-            ua_str: reqInfo?.userAgent,
-            pm_id: process.env.pm_id || 0,
-            url: reqInfo?.originalUrl,
-            username,
-            request,
-            response,
-            stack: logEntry.level === 'error' ? logEntry?.message[0]?.stack || stacks : undefined,
-            year: new Date().getFullYear(),
-            month: new Date().getMonth() + 1,
-            day: new Date().getDate(),
-            timestamp: new Date().getTime(),
-        };
+        const base = payload({
+            reqInfo, file, line, func, clientIp, pkg, username, request, response, stacks
+        })
 
-        const json = Object.assign(base, logEntry);
-        logEntry[MESSAGE] = JSON.stringify(json);
+        const result = Object.assign(base, logEntry);
+        logEntry[MESSAGE] = JSON.stringify(result);
     } catch (e) {
         console.error(e);
+        handleSentry('error', e)
     }
 
     return logEntry;
@@ -146,6 +236,8 @@ const consoleOpts = {
 
 export const filter = {
     log: true,
+    api: true,
+    aws: true,
     sql: true,
     net: true,
     debug: true,
@@ -180,48 +272,67 @@ const transportsSql = [
     // 콘솔로그찍을 때만 색넣자.
     new winston.transports.Console(consoleOpts),
     // 모든 레벨 로그를 저장할 파일 설정
-    new DailyRotateFile({ ...drfOpt, ...{ level: 'debug', filename: `sql.%DATE%.${pmId}.log` } })
+    new DailyRotateFile({ ...drfOpt, ...{ level: 'silly', filename: `sql.%DATE%.${pmId}.log` } })
 ];
 
 const transportsApi = [
     // 콘솔로그찍을 때만 색넣자.
     // new winston.transports.Console(consoleOpts),
     // 모든 레벨 로그를 저장할 파일 설정
-    new DailyRotateFile({ ...drfOpt, ...{ level: 'debug', filename: `api.%DATE%.${pmId}.log` } })
+    new DailyRotateFile({ ...drfOpt, ...{ level: 'silly', filename: `api.%DATE%.${pmId}.log` } })
+];
+
+const transportsAws = [
+    // 콘솔로그찍을 때만 색넣자.
+    // new winston.transports.Console(consoleOpts),
+    // 모든 레벨 로그를 저장할 파일 설정
+    new DailyRotateFile({ ...drfOpt, ...{ level: 'silly', filename: `aws.%DATE%.${pmId}.log` } })
+];
+
+const transportsEtc = [
+    // 콘솔로그찍을 때만 색넣자.
+    // new winston.transports.Console(consoleOpts),
+    // 모든 레벨 로그를 저장할 파일 설정
+    new DailyRotateFile({ ...drfOpt, ...{ level: 'silly', filename: `etc.%DATE%.${pmId}.log` } })
 ];
 
 const general = winston.createLogger({
-    level: 'debug',
+    level: 'general',
     levels,
-    // format: logFormat,
-    // format: winston.format.json(),
-    format: winston.format(jsonFormatter)(),
-    defaultMeta: {},
+    format: winston.format(generalFormatter)(),
     transports: transportsGeneral
 });
 
 const http = winston.createLogger({
     level: 'http',
     levels,
-    // format: logFormat,
-    // format: winston.format.json(),
-    format: winston.format(jsonFormatter)(),
-    defaultMeta: {},
+    format: winston.format(httpFormatter)(),
     transports: transportsHttp
 });
 
 const sql = winston.createLogger({
-    level: 'debug',
+    level: 'sql',
     levels,
-    // format: logFormat,
-    // format: winston.format.json(),
-    format: winston.format(jsonFormatter)(),
-    defaultMeta: {},
+    format: winston.format(sqlFormatter)(),
     transports: transportsSql
 });
 
+const aws = winston.createLogger({
+    level: 'aws',
+    levels,
+    format: winston.format(generalFormatter)(),
+    transports: transportsAws
+});
+
+const etc = winston.createLogger({
+    level: 'etc',
+    levels,
+    format: winston.format(generalFormatter)(),
+    transports: transportsEtc
+});
+
 const api = winston.createLogger({
-    level: 'debug',
+    level: 'api',
     levels,
     format: combine(
         timestamp(),
@@ -266,39 +377,59 @@ const logger = {
         const config = Array.isArray(args) && args.length > 0 ? args[0] : undefined;
         if (!config) return;
 
-        const configSql = { ...config, ...{ debug: config.sql }};
-        const configNet = { ...config, ...{ debug: config.net }};
+        const configSql = { ...config, ...{ silly: config.sql }};
+        const configNet = { ...config, ...{ silly: config.net }};
 
         general.transports.forEach(t => silent(t, config));
         sql.transports.forEach(t => silent(t,  configSql));
         http.transports.forEach(t => silent(t, configNet));
+        sql.transports.forEach(t => silent(t, configNet));
+        api.transports.forEach(t => silent(t, configNet));
+        aws.transports.forEach(t => silent(t, configNet));
     },
     log: (...args) => {
+        args.push(new Error().stack);
         return general.debug(args);
     },
     debug: (...args) => {
+        args.push(new Error().stack);
         return general.debug(args);
     },
     info: (...args) => {
+        args.push(new Error().stack);
         return general.info(args);
     },
     error: (...args) => {
+        args.push(new Error().stack);
         return general.error(args);
     },
     http: (...args) => {
+        args.push(new Error().stack);
         return http.http(args);
     },
     res: (...args) => {
+        args.push(new Error().stack);
         return http.http(args);
     },
     sql: (...args) => {
+        args.push(new Error().stack);
         return sql.debug(args);
     },
     api: (...args) => {
+        args.push(new Error().stack);
         return api.debug(args);
     },
+    aws: (...args) => {
+        args.push(new Error().stack);
+        return aws.debug(args);
+    },
+    etc: (...args) => {
+        args.push(new Error().stack);
+        return etc.debug(args);
+    },
     req: (...args) => {
-        return general.debug(args);
+        args.push(new Error().stack);
+        args.push('req');
     }
 };
 

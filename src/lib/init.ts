@@ -11,7 +11,6 @@ export const initialize = async () => {
         const json = JSON.parse(str);
 
         await initRootAccount(json);
-        await resetUserPasswordByForce();
         await healthCheck();
         initTempDir();
     } catch (e) {
@@ -34,8 +33,6 @@ const initRootAccount = async (json) => {
     }
 };
 
-const resetUserPasswordByForce = async () => {
-};
-
 const healthCheck = async () => {
+    logger.info('health check');
 }

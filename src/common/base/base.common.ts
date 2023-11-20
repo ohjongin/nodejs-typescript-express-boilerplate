@@ -1,11 +1,9 @@
 import { IUser } from '../../@types/user';
-import { BaseController } from './base.controller';
-import { IContext } from '../../@types/context';
-import { BaseService } from './base.service';
 import { assertTrue, parseIntSafe } from '../../lib/utils';
 import { Transaction } from 'sequelize';
 import tid from 'cls-rtracer';
 import { IPermission } from '../../@types/permission';
+import {IContext} from "../../@types/context";
 
 export abstract class BaseCommon {
     protected request: any = {};
@@ -22,17 +20,17 @@ export abstract class BaseCommon {
     protected isForce = false;
     protected traceUuid: any;
 
-    constructor(context: BaseController | BaseService | IContext = undefined) {
+    constructor(context: BaseCommon | IContext | any = undefined) {
         if (!context) return;
 
         // noinspection DuplicatedCode
-        if (context instanceof BaseController || context instanceof BaseService) {
-            this.context = context.getContext();
+        if (context) {
+            this.context = typeof context.getContext === 'function' ? context.getContext() : undefined;
             this.request = context?.req;
             this.environment = context?.env;
 
-            this.actor = context.getActor();
-            this.transaction = context.getTransaction();
+            this.actor = typeof context.getActor === 'function' ? context.getActor() : undefined;
+            this.transaction = typeof context.getTransaction === 'function' ? context.getTransaction() : undefined;
             this.traceUuid = tid.id();
         } else {
             this.context = context;

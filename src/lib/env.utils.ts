@@ -1,9 +1,11 @@
 import { join } from 'path';
 import appRoot from 'app-root-path';
 
+const MAX_ENV_KEY_LENGTH = 35;
+
 export function getOsEnv(key: string): string {
     if (typeof process.env[key] === 'undefined') {
-        throw new Error(`[${process.env.NODE_ENV}] Environment variable ${key} is not set. Root Path:${appRoot.path}`);
+        throw new Error(`[${process.env.NODE_ENV}:${appRoot.path}] ${key.padEnd(MAX_ENV_KEY_LENGTH, ' ')} is not set`);
     }
 
     return process.env[key];
@@ -11,7 +13,7 @@ export function getOsEnv(key: string): string {
 
 export function getOsEnvNumber(key: string, value = undefined): number {
     if (typeof process.env[key] === 'undefined' && value === undefined) {
-        throw new Error(`[${process.env.NODE_ENV}] Environment variable ${key} is not set. Root Path:${appRoot.path}`);
+        throw new Error(`[${process.env.NODE_ENV}:${appRoot.path}] ${key.padEnd(MAX_ENV_KEY_LENGTH, ' ')} is not set. use '${value}'`);
     }
 
     const parsed = parseInt(process.env[key] || value, 10);
@@ -25,7 +27,7 @@ export function getOsEnvNumber(key: string, value = undefined): number {
 
 export function getOsEnvBool(key: string): boolean {
     if (typeof process.env[key] === 'undefined') {
-        throw new Error(`[${process.env.NODE_ENV}] Environment variable ${key} is not set. Root Path:${appRoot.path}`);
+        throw new Error(`[${process.env.NODE_ENV}:${appRoot.path}] ${key.padEnd(MAX_ENV_KEY_LENGTH, ' ')} is not set.`);
     }
 
     return process.env[key] === 'true';
@@ -33,7 +35,7 @@ export function getOsEnvBool(key: string): boolean {
 
 export function getOsEnvBoolOptional(key: string, value = undefined): boolean {
     if (typeof process.env[key] === 'undefined') {
-        console.log(`[${process.env.NODE_ENV}] Environment variable ${key} is not set. Root Path:${appRoot.path}`);
+        console.log(`[${process.env.NODE_ENV}:${appRoot.path}] ${key.padEnd(MAX_ENV_KEY_LENGTH, ' ')} is not set. use '${value}'.`);
         return value;
     }
 
@@ -42,7 +44,7 @@ export function getOsEnvBoolOptional(key: string, value = undefined): boolean {
 
 export function getOsEnvNumberOptional(key: string, value = undefined): number | undefined {
     if (typeof process.env[key] === 'undefined') {
-        console.log(`[${process.env.NODE_ENV}] Environment variable ${key} is not set/ Root Path:${appRoot.path}`);
+        console.log(`[${process.env.NODE_ENV}:${appRoot.path}] ${key.padEnd(MAX_ENV_KEY_LENGTH, ' ')} is not set. use '${value}'.`);
         return value;
     }
 
@@ -56,7 +58,7 @@ export function getOsEnvNumberOptional(key: string, value = undefined): number |
 
 export function getOsEnvOptional(key: string, value = undefined): string | undefined {
     if (typeof process.env[key] === 'undefined') {
-        console.log(`[${process.env.NODE_ENV}] Environment variable ${key} is not set. Root Path:${appRoot.path}`);
+        console.log(`[${process.env.NODE_ENV}:${appRoot.path}] ${key.padEnd(MAX_ENV_KEY_LENGTH, ' ')} is not set. use '${value}'.`);
         return value;
     }
 

@@ -2,15 +2,18 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 
 import * as pkg from '../package.json';
-import {
-    getOsEnv,
-    getOsEnvNumber,
-    getOsEnvOptional,
-    normalizePort
-} from './lib/env';
 import appRoot from 'app-root-path';
 import fs from 'fs';
 import * as process from 'process';
+import {
+    getOsEnv,
+    getOsEnvBoolOptional,
+    getOsEnvNumber,
+    getOsEnvNumberOptional,
+    getOsEnvOptional,
+    normalizePort
+} from './lib/env.utils';
+import { terminate } from './lib/utils';
 
 /**
  * Load .env file or for tests the .env.test file.
@@ -43,11 +46,11 @@ const config = { path: path.join(appRoot.path, `.env${postfix()}`) };
             //file exists
         } else {
             console.error(process.env.NODE_ENV, JSON.stringify(config));
-            process.exit(1);
+            terminate(1);
         }
     } catch(err) {
         console.error(process.env.NODE_ENV, JSON.stringify(config), err);
-        process.exit(1);
+        terminate(1);
     }
 })();
 
@@ -56,7 +59,7 @@ dotenv.config(config);
 /**
  * Environment variables
  */
-const env = {
+export const env = {
     config: config,
     mode: {
         prod: process.env.NODE_ENV?.toLowerCase().includes('prod'),
@@ -67,9 +70,6 @@ const env = {
     init: {
         db: {
             root: {
-                email: getOsEnv('ROOT_EMAIL'),
-                name: getOsEnv('ROOT_NAME'),
-                password: getOsEnv('ROOT_PASSWORD'),
             },
         },
     },
@@ -80,8 +80,12 @@ const env = {
         secret: getOsEnv('SECRET_KEY'),
     },
     mysql: {
+        name:  getOsEnvOptional('MYSQL_NAME', undefined),
         schema: getOsEnv('MYSQL_SCHEMA'),
         port: getOsEnv('MYSQL_PORT'),
+        option: {
+            timeout: getOsEnvNumberOptional('MYSQL_OPTION_TIMEOUT', 5000),
+        },
         write: {
             host: getOsEnv('MYSQL_WRITE_HOST'),
             username: getOsEnv('MYSQL_WRITE_USERNAME'),
@@ -90,6 +94,12 @@ const env = {
             host: getOsEnv('MYSQL_READ_HOST'),
             username: getOsEnv('MYSQL_READ_USERNAME'),
             password: getOsEnv('MYSQL_READ_PASSWORD'),
+        },
+        pool: {
+            min: getOsEnvNumberOptional('MYSQL_POOL_MIN', 1),
+            max: getOsEnvNumberOptional('MYSQL_POOL_MAX', 5),
+            idle: getOsEnvNumberOptional('MYSQL_POOL_IDLE', 10000),
+            acquire: getOsEnvNumberOptional('MYSQL_POOL_ACQUIRE', 30000),
         },
     },
     aws: {
@@ -145,25 +155,28 @@ const env = {
             url: getOsEnvOptional('APP_WEB_URL'),
         },
         hostname: getOsEnvOptional('APP_HOSTNAME'),
+        log: {
+            excludes: getOsEnvOptional('APP_LOG_EXCLUDE', '').split(','),
+            stack: getOsEnvBoolOptional('APP_LOG_STACK', false),
+        },
     },
     policy: {
         token: {
-            access: {
-                expire: getOsEnv('POLICY_TOKEN_ACCESS_EXPIRE'),
-            },
-            refresh: {
-                expire: getOsEnv('POLICY_TOKEN_REFRESH_EXPIRE'),
-            },
-            issue: {
-                margin: getOsEnvNumber('POLICY_TOKEN_ISSUE_MARGIN', 100),
-            }
         },
         redis: {
-            sync: {
-                count: getOsEnvNumber('POLICY_REDIS_SYNC_COUNT', 100),
+        },
+        search: {
+        },
+        account: {
+        },
+        max: {
+            page: {
+                size: getOsEnvNumber('POLICY_MAX_PAGE_SIZE', 100),
             }
         },
-    }
+        verify: {
+        },
+        test: {
+        }
+    },
 };
-
-export default env;

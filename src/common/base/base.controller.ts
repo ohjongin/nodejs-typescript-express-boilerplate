@@ -13,6 +13,10 @@ export abstract class BaseController extends BaseCommon {
     protected traceUuid: string;
     protected transaction: Transaction = undefined;
 
+    constructor(context = undefined) {
+        super(context);
+    }
+
     get env() {
         return this.environment;
     }

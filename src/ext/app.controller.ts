@@ -1,10 +1,9 @@
-import { BaseController } from './common/base/base.controller';
+import { BaseController } from '../common/base/base.controller';
 import httpStatus from 'http-status';
-import { Result } from './common/result';
-import logger from './lib/logger';
-import env from './env';
+import { Result } from '../common/result';
+import logger from '../lib/logger';
 import AppService from './app.service';
-import { handleSentry } from './lib/utils';
+import { handleSentry } from '../lib/utils';
 
 export default class AppController extends BaseController {
     health = async (req, res) => {
@@ -36,9 +35,5 @@ export default class AppController extends BaseController {
 
         logger.res(statusCode, result, req);
         await this.response(req, res, statusCode, result);
-    }
-
-    redirect = (req, res) => {
-        res.redirect(env.app.web.url);
     }
 }

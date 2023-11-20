@@ -73,3 +73,7 @@ typings/
 /.scannerwork/
 /.sonar/
 /dist/
+
+# Local interim files
+.DS_Store
+**/.DS_Store

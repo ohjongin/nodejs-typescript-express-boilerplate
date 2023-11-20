@@ -1,15 +1,13 @@
 import dotenv from 'dotenv';
-import env from '../env';
-import {Decryptor, Encryptor} from 'strong-cryptor';
+import { Decryptor, Encryptor } from 'strong-cryptor';
 import short from 'short-uuid';
 import logger from './logger';
 import ApiError from '../common/api.error';
 import ApiCodes from '../common/api.codes';
 import ApiMessages from '../common/api.messages';
-import {Model, Op} from 'sequelize';
-import {add, isValid, parse} from 'date-fns';
+import { isValid, parse } from 'date-fns';
 import crypto from 'crypto';
-import {v4 as uuidv4} from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import appRoot from 'app-root-path';
 import fs from 'fs';
@@ -17,21 +15,24 @@ import * as fsExtra from 'fs-extra';
 import * as Sentry from '@sentry/node';
 import _ from 'lodash';
 import os from 'os';
-import {appPath} from '../app';
+import { appPath } from '../app';
 import dayjs from 'dayjs';
+import { env } from '../env';
+import process from 'process';
+import * as flatted from 'flatted';
 
 dotenv.config();
 
 export const jsonMaskConfig = {
     cardFields: ['credit', 'debit'],
     emailFields: ['email'],
-    passwordFields: ['password', 'source', 'target'],
+    passwordFields: ['password', 'source', 'target', 'client_secret', 'secret'],
     phoneFields: ['phone', 'mobile'],
-    stringMaskOptions:  {
+    stringMaskOptions: {
         maskWith: "*",
         maskOnlyFirstOccurance: false,
     },
-    stringFields: ['addr1', 'addr2', 'addr_state', 'addr_city'],
+    stringFields: ['addr1', 'addr2', 'addr_state', 'addr_city', 'address'],
     uuidFields: ['uuid']
 };
 
@@ -39,15 +40,31 @@ export const sleep = (ms) => {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+export const getCaller = (depth = 2) => {
+    const frame = new Error().stack.split("\n")[depth]; // change to 3 for grandparent func
+    const line = frame.split(":").reverse()[1];
+    const file = frame.split(':')[0].split('/').reverse()[0];
+    const func = frame.split(" ")[5];
+
+    return `${file}:${line} (${func})`
+}
+
+export const randomIntRange = (min: number, max: number) => crypto.randomInt(min, max);
+
 export const randomString = (length: number): string => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    const charactersLength = characters.length;
-    for (let i = 0; i < length; ++i) {
-        result += characters.charAt(Math.floor(crypto.randomInt(charactersLength)));
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+    const charsLength = chars.length;
+    const randomBytes = crypto.randomBytes(length);
+    const result = new Array(length);
+
+    let cursor = 0;
+    for (let i = 0; i < length; i++) {
+        cursor += randomBytes[i];
+        result[i] = chars[cursor % charsLength];
     }
 
-    return result;
+    return result.join("");
 };
 
 export const isValidUrl = (url) => {
@@ -91,8 +108,7 @@ export const propertiesToArray = obj => {
 
     const paths = (obj = {}, head = '') => {
         return Object.entries(obj)
-            .reduce((product, [key, value]) =>
-            {
+            .reduce((product, [key, value]) => {
                 const fullPath = addDelimiter(head, key)
                 return isObject(value) ?
                     product.concat(paths(value, fullPath))
@@ -127,18 +143,6 @@ export const iterate = (obj, stack) => {
     }
 };
 
-export const getPlainObject = (obj) => {
-    let result = {...obj};
-    try {
-        // Sequelize Model을 plain 처리
-        if (obj instanceof Model) result = obj.get({ plain: true });
-    } catch (e) {
-        logger.error(e);
-    }
-
-    return result;
-}
-
 export const getParsedValue = (value) => {
     let result;
     try {
@@ -151,35 +155,6 @@ export const getParsedValue = (value) => {
     return result;
 }
 
-export const removeSensitiveValues = (obj, depth = 1) => {
-    if (depth > 10) return obj;
-
-    const result = getPlainObject(obj);
-    for (const property in result) {
-        if (!Object.prototype.hasOwnProperty.call(result, property)) continue;
-
-        const value = typeof result[property] === 'string' ? getParsedValue(result[property]) : result[property];
-        if (typeof value === "object") {
-            result[property] = removeSensitiveValues(value, depth + 1);
-        } else if (typeof value === 'string') {
-            if (['source', 'target'].includes(property?.toLowerCase()) || property?.toLowerCase().includes('password')) {
-                result[property] = undefined;
-            }
-        }
-    }
-    return result;
-};
-
-export const securedStringify = (obj) => {
-    let target;
-
-    // Sequelize Model을 plain 처리
-    if (obj instanceof Model) target = {...obj.get({ plain: true })};
-    else target = {...obj};
-
-    return JSON.stringify(removeSensitiveValues(target));
-}
-
 /**
  * Object에서 undefined 와 null 항목을 제거
  *
@@ -189,7 +164,7 @@ export const securedStringify = (obj) => {
 export const prune = (obj, filter = [undefined, null]) => {
     if (!obj) return {};
 
-    const result = {...obj};
+    const result = { ...obj };
     Object.keys(result).forEach((key) => (filter?.includes(result[key])) && delete result[key]);
     return result;
 };
@@ -202,7 +177,7 @@ export const prune = (obj, filter = [undefined, null]) => {
 export const clean = (obj) => {
     if (!obj) return {};
 
-    const result = {...obj};
+    const result = { ...obj };
     Object.keys(result).forEach((key) => (Object.keys(result[key]).length === 0) && delete result[key]);
     return result;
 };
@@ -217,7 +192,6 @@ export const str2Date = (str: string, defaultValue = new Date()): Date => {
         date = str ? new Date(str) : defaultValue;
     } catch (err) {
         date = defaultValue;
-        logger.error(JSON.stringify(err));
         logger.error(err);
     }
 
@@ -236,7 +210,6 @@ export const parseIntSafe = (data, value = undefined): number => {
         result = parseInt(data, 10);
         if (isNaN(result)) result = value;
     } catch (e) {
-        logger.error(JSON.stringify(e));
         logger.error(e);
     }
 
@@ -251,7 +224,6 @@ export const parseFloatSafe = (data, value = undefined): number => {
         result = parseFloat(data);
         if (isNaN(result)) result = value;
     } catch (e) {
-        logger.error(JSON.stringify(e));
         logger.error(e);
     }
 
@@ -288,7 +260,7 @@ export const getTempDirPath = () => {
 
 export const getTempDirSafe = () => {
     const dir = getTempDirPath();
-    if (!fs.existsSync(dir)){
+    if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
     return dir;
@@ -315,7 +287,7 @@ export const initMenuFile = () => {
 
 export const assertNull = (value: any, error: Error, callback = undefined) => {
     if (!value) return;
-    if (callback instanceof Function) callback();
+    if (callback instanceof Function) callback(error);
     if (error instanceof Error) throw error;
 }
 
@@ -327,18 +299,25 @@ export const assertNotNull = (value: any, error: Error, callback = undefined) =>
 
 export const assertTrue = (value: boolean, error: Error, callback = undefined) => {
     if (value === true || value) return;
-    if (callback instanceof Function) callback();
+    if (callback instanceof Function) callback(error);
     if (error instanceof Error) throw error;
 }
 
 export const handleSentry = (level, err, req = undefined, data = undefined) => {
+    if (env.mode.test) return;
+
+    if (err instanceof ApiError) {
+        if (err.detail?.sentry === false) return;
+    }
+
     try {
         Sentry.captureException(err, {
             level: level,
             extra: {
+                headers: req?.headers,
                 params: req?.params,
                 query: req?.query,
-                body: removeSensitiveValues(req?.body),
+                body: req?.body,
                 detail: err?.detail,
                 data,
             },
@@ -448,15 +427,6 @@ export const mergeObject = (toUpdate, refObj) => {
     return updateData;
 };
 
-export const getCaller = () => {
-    const frame = new Error().stack.split("\n")[2]; // change to 3 for grandparent func
-    const line = frame.split(":").reverse()[1];
-    const file = frame.split(':')[0].split('/').reverse()[0];
-    const func = frame.split(" ")[5];
-
-    return `${file}:${line} (${func})`
-}
-
 export const readMenuAsset = () => {
     let result = {
         version: 0,
@@ -485,20 +455,10 @@ export const readMenuAsset = () => {
     return result;
 }
 
-export const getDateRangeCondition = (from, to) => {
-    if (!from || !to) {
-        return null;
-    }
-    assertTrue(isValidDateString(from) && isValidDateString(to), new ApiError(ApiCodes.BAD_REQUEST, ApiMessages.BAD_REQUEST, {
-        message: `Invalid date format for from, to`,
-        from: from,
-        to: to
-    }));
-
-    const fromDate = parse(from, 'yyyyMMdd', new Date());
-    const toDate = add(parse(to, 'yyyyMMdd', new Date()), { days: 1 });
-
-    return { [Op.gte]: fromDate, [Op.lt]: toDate };
+export const isSubset = (parentArray, subsetArray) => {
+    return subsetArray.every((el) => {
+        return parentArray.includes(el)
+    })
 }
 
 export const isValidDate = (str) => {
@@ -507,6 +467,89 @@ export const isValidDate = (str) => {
     return str && dayjs(str).isValid()
 }
 
-export const getSplitQueryPramRegex = () => {
-    return /[,+]/;
+export const getQueryParamSplitRegex = (isSpaceDelimeter = true) => {
+    return isSpaceDelimeter ? /[\s,+]/ : /[,+]/;
+}
+
+/**
+ * value 가 null 인 경우 isNaN이 false를 반환하기 때문에 별도 utility가 필요함
+ *
+ * @param value
+ */
+export const isValidNumber = (value) => {
+    return !isNaN(parseFloat(value)) && isFinite(value);
+}
+
+export const isValidArray = (arr) => {
+    return Array.isArray(arr) && arr.length > 0;
+}
+
+export const isValidVolume = (data) => {
+    if (!data) return false;
+
+    return isValidNumber(data.width) && isValidNumber(data.length) && isValidNumber(data.height);
+}
+
+export const isValidWeights = (data) => {
+    if (!data) return false;
+
+    return isValidNumber(data.gross) && isValidNumber(data.chargeable);
+}
+
+export const getAssetJson = (filename: string) => {
+    let result;
+
+    const str = fs.readFileSync(path.join(appPath, 'assets', filename), { encoding: 'utf8', flag: 'r' });
+    try {
+        result = JSON.parse(str);
+    } catch (e) {
+        logger.error(e);
+        handleSentry('error', e, undefined, str);
+    }
+
+    return result;
+}
+
+export const extractObjectIds = (data) => {
+    if (!data) return data;
+    if (!isValidArray(data)) return data;
+
+    const results = data.map(d => {
+        if (isValidNumber(d)) return d;
+        else if (typeof d === 'object' && isValidId(d._id)) return d._id;
+
+        assertTrue(false, new ApiError(ApiCodes.BAD_REQUEST, ApiMessages.BAD_REQUEST), {
+            message: `Invalid object array`,
+            data,
+        })
+    });
+
+    return results;
+}
+
+// https://stackoverflow.com/questions/70720839/is-there-a-way-to-check-japanese-kanji-in-react-js
+// https://stackoverflow.com/questions/15033196/using-javascript-to-check-whether-a-string-contains-japanese-characters-includi
+// /[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]/
+// -------------_____________-------------_____________-------------_____________
+// Punctuation   Hiragana     Katakana    Full-width       CJK      CJK Ext. A
+//                                          Roman/      (Common &      (Rare)
+//                                        Half-width    Uncommon)
+//                                          Katakana
+export const hasKanji = (str) => {
+    if (!str) return false;
+
+    const regex = /[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]/
+    return str.match(regex) ? true : false;
+};
+
+export const flatten = (obj) => {
+    return flatted.parse(flatted.stringify(obj));
+}
+
+export const jsonToString = (obj) => {
+    return flatted.stringify(obj);
+}
+
+export const terminate = (value = 1) => {
+    process.exit(value);
 }
